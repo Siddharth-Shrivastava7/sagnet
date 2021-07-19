@@ -1,8 +1,9 @@
 import torch
 import torch.nn as nn
 import torch.utils.model_zoo as model_zoo
+from torchsummary import summary
 
-from .randomizations import StyleRandomization, ContentRandomization
+from randomizations import StyleRandomization, ContentRandomization
 
 model_urls = {
     'resnet18': 'https://download.pytorch.org/models/resnet18-5c106cde.pth',
@@ -28,7 +29,7 @@ class BasicBlock(nn.Module):
         self.conv2 = nn.Conv2d(planes, planes, kernel_size=3, padding=1, bias=False)
         self.bn2 = nn.BatchNorm2d(planes)
         self.relu = nn.ReLU(inplace=True)
-        self.downsample = downsample
+        self.downsample = downsample 
         self.stride = stride
 
     def forward(self, x):
@@ -109,7 +110,7 @@ class ResNet(nn.Module):
         self.layer3 = self._make_layer(block, 256, layers[2], stride=2)
         self.layer4 = self._make_layer(block, 512, layers[3], stride=2)
         
-        self.avgpool = nn.AdaptiveAvgPool2d(1)
+        self.avgpool = nn.AdaptiveAvgPool2d(1)   ## i think this part is similar to that of prediction classifier layer 
         self.dropout = nn.Dropout(self.drop)
         self.fc = nn.Linear(512 * block.expansion, num_classes)
 
@@ -118,7 +119,7 @@ class ResNet(nn.Module):
             self.style_randomization = StyleRandomization()
             self.content_randomization = ContentRandomization()
             
-            # style-biased network
+            # style-biased network  ## specifically, making this structure cause the style biased n/w has the same structure as that of content biased n/w.
             style_layers = []
             if style_stage == 1:
                 self.inplanes = 64
@@ -193,15 +194,20 @@ class ResNet(nn.Module):
         for i, layer in enumerate([self.layer1, self.layer2, self.layer3, self.layer4]):
             if self.sagnet and i + 1 == self.style_stage:
                 # randomization
+                # print(i) #2nd # the randomisation stage (the stage after which randomisation are done, and the no of stage in the feature extractor)
+                # print('*************')
                 x_style = self.content_randomization(x)
                 x = self.style_randomization(x)
+            # print(i) 
+            # print('*************')
             x = layer(x)
 
         # content output 
-        feat = self.avgpool(x)
+        feat = self.avgpool(x) # reducing H,W to (1,1)
+        # print(feat.shape) # torch.Size([2, 2048, 1, 1]) # [N,C, H, W]
         feat = feat.view(x.size(0), -1)
         feat = self.dropout(feat)
-        y = self.fc(feat)
+        y = self.fc(feat) # final content for each of the representing classes in the task
     
         if self.sagnet:
             # style output
@@ -241,6 +247,15 @@ def sag_resnet(depth, pretrained=False, **kwargs):
                 for k, v in states.items():
                     if k.startswith('layer' + str(i)):
                         states_style[str(i - model.style_stage) + k[6:]] = v
-            model.style_net.load_state_dict(states_style)
+            model.style_net.load_state_dict(states_style) 
+            ## for loading the model params in style net(((Content Randomisation)))..by sharing weights with that of Style Randomisation n/w
     
     return model
+
+model = sag_resnet(depth=101,
+                       num_classes=16,
+                       drop=0.5,
+                       sagnet=True,
+                       style_stage=3).cuda()
+
+summary(model, (3, 540, 960))
